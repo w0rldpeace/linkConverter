@@ -1,6 +1,6 @@
 plugins {
     id 'java'
-    id 'org.springframework.boot' version '3.4.4'
+    id 'org.springframework.boot' version '3.2.4'
     id 'io.spring.dependency-management' version '1.1.7'
     id 'io.freefair.lombok' version '8.6' // Добавляем плагин для Lombok
 }
@@ -19,6 +19,10 @@ repositories {
 }
 
 dependencies {
+    // Add explicit Jackson dependencies
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.17.0'
+    implementation 'com.fasterxml.jackson.core:jackson-annotations:2.17.0'
+
     // Spring Boot Starters
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
@@ -36,6 +40,7 @@ dependencies {
 
     // Testing
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.mockito:mockito-junit-jupiter:5.11.0'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 
     // Encoding

@@ -1,10 +1,15 @@
 package com.task.linkconverter.model;
 
-import lombok.AllArgsConstructor;
-import lombok.Getter;
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.Value;
 
-@Getter
-@AllArgsConstructor
+@Value
 public class RetrieveResponse {
-    private final String originalUrl;
+    String originalUrl;
+
+    @JsonCreator
+    public RetrieveResponse(@JsonProperty("originalUrl") String originalUrl) {
+        this.originalUrl = originalUrl;
+    }
 }

@@ -1,10 +1,15 @@
 package com.task.linkconverter.model;
 
-import lombok.AllArgsConstructor;
-import lombok.Getter;
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.Value;
 
-@Getter
-@AllArgsConstructor
+@Value
 public class ShortenResponse {
-    private final String shortLink;
+    String shortLink;
+
+    @JsonCreator
+    public ShortenResponse(@JsonProperty("shortLink") String shortLink) {
+        this.shortLink = shortLink;
+    }
 }
