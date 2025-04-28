@@ -13,6 +13,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Optional;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -27,12 +29,14 @@ class ShortLinkServiceTest {
     @InjectMocks
     private ShortLinkService service;
 
+    private final String testUserIp = "127.0.0.1";
+
     @Test
     void shortenUrl_NewUrl_CreatesNewEntry() {
         when(repository.findByOriginalUrl(any())).thenReturn(Optional.empty());
         when(repository.save(any())).thenReturn(new ShortLink());
 
-        String result = service.shortenUrl("https://www.example.com");
+        String result = service.shortenUrl("https://www.example.com", testUserIp);
         assertNotNull(result);
         verify(repository).save(any());
     }
@@ -42,7 +46,7 @@ class ShortLinkServiceTest {
         ShortLink existing = new ShortLink(1L, "https://www.example.com", "abc123", Instant.now());
         when(repository.findByOriginalUrl(any())).thenReturn(Optional.of(existing));
 
-        String result = service.shortenUrl("https://www.example.com");
+        String result = service.shortenUrl("https://www.example.com", testUserIp);
         assertEquals("abc123", result);
     }
 
@@ -70,5 +74,66 @@ class ShortLinkServiceTest {
         String hash1 = service.generateShortLink(url);
         String hash2 = service.generateShortLink(url);
         assertEquals(hash1, hash2);
+    }
+
+    @Test
+    void shortenUrl_ExceedsRateLimit_ThrowsException() throws InterruptedException {
+        when(repository.findByOriginalUrl(any())).thenReturn(Optional.empty());
+
+        CountDownLatch saveBlocker = new CountDownLatch(1);
+        when(repository.save(any())).thenAnswer(invocation -> {
+            saveBlocker.await();
+            return new ShortLink();
+        });
+
+        ExecutorService executor = Executors.newFixedThreadPool(100);
+        CountDownLatch threadsStarted = new CountDownLatch(100);
+
+        /**
+         * Start 100 threads
+         */
+        for (int i = 0; i < 100; i++) {
+            executor.submit(() -> {
+                service.shortenUrl("https://www.example.com", testUserIp);
+                threadsStarted.countDown();
+            });
+        }
+
+        threadsStarted.await(2, TimeUnit.SECONDS);
+
+        /**
+         * 101st request should fail
+         */
+        assertThrows(RateLimitExceededException.class, () -> {
+            service.shortenUrl("https://www.example.com", testUserIp);
+        });
+
+        saveBlocker.countDown();
+
+        executor.shutdown();
+        executor.awaitTermination(1, TimeUnit.SECONDS);
+    }
+
+    @Test
+    void rateLimiter_Cleanup_RemovesExpiredEntries() {
+        String userIp = "192.168.1.1";
+
+        service.shortenUrl("https://www.example.com", userIp);
+
+        ConcurrentHashMap<String, AtomicInteger> rateLimiter = service.getRateLimiterForTesting();
+
+        rateLimiter.entrySet().removeIf(entry -> entry.getValue().get() == 0);
+
+        assertFalse(rateLimiter.containsKey(userIp));
+    }
+
+    @Test
+    void checkRateLimit_AfterRelease_DecrementsCounter() {
+        String userIp = "192.168.1.1";
+        service.shortenUrl("https://www.example.com", userIp);
+
+        ConcurrentHashMap<String, AtomicInteger> rateLimiter = service.getRateLimiterForTesting();
+
+        assertFalse(rateLimiter.containsKey(userIp));
     }
 }

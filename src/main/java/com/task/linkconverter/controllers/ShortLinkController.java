@@ -5,6 +5,7 @@ import com.task.linkconverter.model.RetrieveResponse;
 import com.task.linkconverter.model.ShortenRequest;
 import com.task.linkconverter.model.ShortenResponse;
 import com.task.linkconverter.service.ShortLinkService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -23,9 +24,15 @@ public class ShortLinkController {
     private final AppConfig appConfig;
 
     @PostMapping("/shorten")
-    public ResponseEntity<ShortenResponse> shortenUrl(@Valid @RequestBody ShortenRequest request) {
+    public ResponseEntity<ShortenResponse> shortenUrl(
+            @Valid
+            @RequestBody
+            ShortenRequest request,
+            HttpServletRequest httpServletRequest
+    ) {
         log.info("POST /shorten for URL: {}", request.getOriginalUrl());
-        String shortCode = service.shortenUrl(request.getOriginalUrl());
+        String userIp = getClientIp(httpServletRequest);
+        String shortCode = service.shortenUrl(request.getOriginalUrl(), userIp);
         String fullUrl = constructFullUrl(shortCode);
         return ResponseEntity.ok(new ShortenResponse(fullUrl));
     }
@@ -51,5 +58,26 @@ public class ShortLinkController {
         } catch (URISyntaxException e) {
             throw new IllegalArgumentException("Invalid short URL format");
         }
+    }
+
+    private String getClientIp(HttpServletRequest request) {
+        String[] headersToCheck = {"X-Forwarded-For", "Proxy-Client-IP", "WL-Proxy-Client-IP"};
+
+        for (String header : headersToCheck) {
+            String ip = request.getHeader(header);
+            if (isValidIp(ip)) {
+                return processIp(ip);
+            }
+        }
+
+        return processIp(request.getRemoteAddr());
+    }
+
+    private boolean isValidIp(String ip) {
+        return ip != null && !ip.isEmpty() && !"unknown".equalsIgnoreCase(ip);
+    }
+
+    private String processIp(String ip) {
+        return ip.split(",")[0].trim();
     }
 }

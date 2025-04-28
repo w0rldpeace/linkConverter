@@ -2,10 +2,12 @@ package com.task.linkconverter.service;
 
 import com.task.linkconverter.exceptions.LinkExpiredException;
 import com.task.linkconverter.exceptions.LinkNotFoundException;
+import com.task.linkconverter.exceptions.RateLimitExceededException;
 import com.task.linkconverter.exceptions.ShortLinkCollisionException;
 import com.task.linkconverter.interfaces.ShortLinkRepository;
 import com.task.linkconverter.model.ShortLink;
 import io.seruco.encoding.base62.Base62;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -16,6 +18,11 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
 @Service
@@ -23,14 +30,49 @@ import java.util.Arrays;
 public class ShortLinkService {
     private final ShortLinkRepository repository;
 
-    public String shortenUrl(String originalUrl) {
-        log.debug("Shortening URL: {}", originalUrl);
-        return repository.findByOriginalUrl(originalUrl)
-                .map(existing -> {
-                    log.info("Returning existing short code for URL: {}", originalUrl);
-                    return existing.getShortLink(); // Still returns short code
-                })
-                .orElseGet(() -> createAndSaveShortLink(originalUrl));
+    private final ConcurrentHashMap<String, AtomicInteger> rateLimiter = new ConcurrentHashMap<>();
+    private final ScheduledExecutorService cleanupScheduler = Executors.newSingleThreadScheduledExecutor();
+
+    /**
+     * Self-cleaning every 5 minutes
+     */
+    @PostConstruct
+    public void init() {
+        cleanupScheduler.scheduleAtFixedRate(() ->
+                        rateLimiter.entrySet().removeIf(entry -> entry.getValue().get() == 0),
+                5, 5, TimeUnit.MINUTES
+        );
+    }
+
+    private void checkRateLimit(String userIp) {
+        AtomicInteger counter = rateLimiter.computeIfAbsent(userIp, k -> new AtomicInteger(0));
+        int current = counter.incrementAndGet();
+        if (current > 100) {
+            counter.decrementAndGet();
+            throw new RateLimitExceededException("Rate limit exceeded");
+        }
+    }
+
+    private void releaseRateLimit(String userIp) {
+        rateLimiter.computeIfPresent(userIp, (k, v) -> {
+            v.decrementAndGet();
+            return v.get() > 0 ? v : null;
+        });
+    }
+
+    public String shortenUrl(String originalUrl, String userIp) {
+        checkRateLimit(userIp);
+        try {
+            log.debug("Shortening URL: {}", originalUrl);
+            return repository.findByOriginalUrl(originalUrl)
+                    .map(existing -> {
+                        log.info("Returning existing short code for URL: {}", originalUrl);
+                        return existing.getShortLink();
+                    })
+                    .orElseGet(() -> createAndSaveShortLink(originalUrl));
+        } finally {
+            releaseRateLimit(userIp);
+        }
     }
 
     private String createAndSaveShortLink(String originalUrl) {
@@ -77,5 +119,9 @@ public class ShortLinkService {
         } catch (NoSuchAlgorithmException e) {
             throw new RuntimeException("Error generating short code", e);
         }
+    }
+
+    public ConcurrentHashMap<String, AtomicInteger> getRateLimiterForTesting() {
+        return rateLimiter;
     }
 }

@@ -30,4 +30,11 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(new ErrorResponse("Internal server error", "SERVER_ERROR"));
     }
+
+    @ExceptionHandler({RateLimitExceededException.class})
+    public ResponseEntity<ErrorResponse> handleRateLimitExceeded(RuntimeException ex) {
+        log.warn("Rate limit exceeded: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .body(new ErrorResponse(ex.getMessage(), "RATE_LIMIT_EXCEEDED"));
+    }
 }
