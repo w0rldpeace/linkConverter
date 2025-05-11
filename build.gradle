@@ -2,7 +2,7 @@ plugins {
     id 'java'
     id 'org.springframework.boot' version '3.2.4'
     id 'io.spring.dependency-management' version '1.1.7'
-    id 'io.freefair.lombok' version '8.6' // Добавляем плагин для Lombok
+    id 'io.freefair.lombok' version '8.6'
 }
 
 group = 'com.task'
@@ -19,14 +19,11 @@ repositories {
 }
 
 dependencies {
-    // Add explicit Jackson dependencies
-    implementation 'com.fasterxml.jackson.core:jackson-databind:2.17.0'
-    implementation 'com.fasterxml.jackson.core:jackson-annotations:2.17.0'
-
     // Spring Boot Starters
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
 
     // Database
     runtimeOnly 'com.h2database:h2'
@@ -38,13 +35,20 @@ dependencies {
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
 
-    // Testing
+    // Test
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
-    testImplementation 'org.mockito:mockito-junit-jupiter:5.11.0'
-    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    testImplementation 'org.testcontainers:testcontainers:1.19.3'
+    testImplementation 'org.testcontainers:junit-jupiter:1.19.3'
 
     // Encoding
     implementation 'io.seruco.encoding:base62:0.1.3'
+}
+
+test {
+    useJUnitPlatform()
+    testLogging {
+        events "passed", "skipped", "failed"
+    }
 }
 
 tasks.named('test') {

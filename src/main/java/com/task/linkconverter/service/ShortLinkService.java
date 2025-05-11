@@ -10,6 +10,9 @@ import io.seruco.encoding.base62.Base62;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
@@ -18,50 +21,22 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
+import java.util.Collections;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class ShortLinkService {
+    private static final String GLOBAL_RATE_LIMIT_KEY = "global_rate_limit";
+    private static final int GLOBAL_RATE_LIMIT = 100;
+    private static final int WINDOW_MINUTES = 1;
+
     private final ShortLinkRepository repository;
+    private final RedisTemplate<String, Integer> redisTemplate;
 
-    private final ConcurrentHashMap<String, AtomicInteger> rateLimiter = new ConcurrentHashMap<>();
-    private final ScheduledExecutorService cleanupScheduler = Executors.newSingleThreadScheduledExecutor();
-
-    /**
-     * Self-cleaning every 5 minutes
-     */
-    @PostConstruct
-    public void init() {
-        cleanupScheduler.scheduleAtFixedRate(() ->
-                        rateLimiter.entrySet().removeIf(entry -> entry.getValue().get() == 0),
-                5, 5, TimeUnit.MINUTES
-        );
-    }
-
-    private void checkRateLimit(String userIp) {
-        AtomicInteger counter = rateLimiter.computeIfAbsent(userIp, k -> new AtomicInteger(0));
-        int current = counter.incrementAndGet();
-        if (current > 100) {
-            counter.decrementAndGet();
-            throw new RateLimitExceededException("Rate limit exceeded");
-        }
-    }
-
-    private void releaseRateLimit(String userIp) {
-        rateLimiter.computeIfPresent(userIp, (k, v) -> {
-            v.decrementAndGet();
-            return v.get() > 0 ? v : null;
-        });
-    }
-
-    public String shortenUrl(String originalUrl, String userIp) {
-        checkRateLimit(userIp);
+    public String shortenUrl(String originalUrl) {
+        checkGlobalRateLimit();
         try {
             log.debug("Shortening URL: {}", originalUrl);
             return repository.findByOriginalUrl(originalUrl)
@@ -70,8 +45,20 @@ public class ShortLinkService {
                         return existing.getShortLink();
                     })
                     .orElseGet(() -> createAndSaveShortLink(originalUrl));
-        } finally {
-            releaseRateLimit(userIp);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void checkGlobalRateLimit() {
+        Long currentCount = redisTemplate.opsForValue().increment(GLOBAL_RATE_LIMIT_KEY, 1);
+
+        if (currentCount != null && currentCount == 1) {
+            redisTemplate.expire(GLOBAL_RATE_LIMIT_KEY, WINDOW_MINUTES, TimeUnit.MINUTES);
+        }
+
+        if (currentCount != null && currentCount > GLOBAL_RATE_LIMIT) {
+            throw new RateLimitExceededException("Global rate limit exceeded");
         }
     }
 
@@ -119,9 +106,5 @@ public class ShortLinkService {
         } catch (NoSuchAlgorithmException e) {
             throw new RuntimeException("Error generating short code", e);
         }
-    }
-
-    public ConcurrentHashMap<String, AtomicInteger> getRateLimiterForTesting() {
-        return rateLimiter;
     }
 }
